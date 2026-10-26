@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.coffeecat.mypassword.next'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.example.coffeecat.mypassword.next'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0'
+    }
+
+}
+
+// Keep the installable APK recognizable by its original project name.
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.outputs.each { output ->
+            output.outputFileName.set("MyPassword-${variant.buildType}.apk")
+        }
+    }
+}
