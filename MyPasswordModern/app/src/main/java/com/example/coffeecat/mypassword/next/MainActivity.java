@@ -54,13 +54,17 @@ public class MainActivity extends Activity {
     private static final int BORDER = Color.rgb(61, 74, 93);
 
     private EditText masterInput;
+    private EditText confirmMasterInput;
     private EditText secondInput;
     private EditText noteInput;
     private Button masterButton;
     private Button generateButton;
+    private Button saveButton;
     private TextView menuButton;
     private Spinner lengthSpinner;
     private LinearLayout masterCard;
+    private TextView masterTitleView;
+    private TextView masterCaptionView;
     private LinearLayout generatorCard;
     private LinearLayout resultCard;
     private TextView result;
@@ -132,8 +136,11 @@ public class MainActivity extends Activity {
 
     private void buildMasterCard(LinearLayout page) {
         masterCard = card();
-        masterCard.addView(sectionTitle("验证主密码"), matchWrap());
-        masterCard.addView(sectionCaption("输入主密码以继续。"), withTopMargin(matchWrap(), 6));
+        masterTitleView = sectionTitle("验证主密码");
+        masterCard.addView(masterTitleView, matchWrap());
+
+        masterCaptionView = sectionCaption("输入主密码以继续。");
+        masterCard.addView(masterCaptionView, withTopMargin(matchWrap(), 6));
 
         masterInput = input("请输入主密码",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
@@ -142,17 +149,88 @@ public class MainActivity extends Activity {
         styleInput(masterInput);
         masterCard.addView(masterInput, withTopMargin(matchWrap(), 18));
 
+        confirmMasterInput = input("请再次输入主密码以确认",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        confirmMasterInput.setSingleLine(true);
+        confirmMasterInput.setTransformationMethod(PasswordTransformationMethod.getInstance());
+        styleInput(confirmMasterInput);
+        confirmMasterInput.setVisibility(View.GONE);
+        masterCard.addView(confirmMasterInput, withTopMargin(matchWrap(), 12));
+
         masterButton = primaryButton("解锁");
         masterCard.addView(masterButton, withTopMargin(matchWrap(), 16));
         page.addView(masterCard, bottomMargin(matchWrap(), 16));
-        masterButton.setOnClickListener(v -> verifyMaster());
+
+        masterButton.setOnClickListener(v -> handleMasterButtonClick());
+
+        updateMasterCardUI();
+    }
+
+    private void updateMasterCardUI() {
+        if (!savedEntryStore.hasMasterPassword()) {
+            masterTitleView.setText("设置主密码");
+            masterCaptionView.setText("首次使用，请设置主密码（请牢记）。");
+            masterInput.setHint("请设置主密码");
+            confirmMasterInput.setVisibility(View.VISIBLE);
+            masterButton.setText("保存主密码并登录");
+        } else {
+            masterTitleView.setText("验证主密码");
+            masterCaptionView.setText("输入主密码以继续。");
+            masterInput.setHint("请输入主密码");
+            confirmMasterInput.setVisibility(View.GONE);
+            masterButton.setText("解锁");
+        }
+    }
+
+    private void handleMasterButtonClick() {
+        String password = masterInput.getText().toString();
+        if (password.isEmpty()) {
+            Toast.makeText(this, "请输入主密码", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (!savedEntryStore.hasMasterPassword()) {
+            String confirm = confirmMasterInput.getText().toString();
+            if (confirm.isEmpty()) {
+                Toast.makeText(this, "请再次输入主密码以确认", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (!password.equals(confirm)) {
+                Toast.makeText(this, "两次输入的密码不一致", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            savedEntryStore.setMasterPassword(password);
+            Toast.makeText(this, "主密码设置成功", Toast.LENGTH_SHORT).show();
+            unlockApp(password);
+        } else {
+            if (savedEntryStore.verifyMasterPassword(password)) {
+                failedAttempts = 0;
+                unlockApp(password);
+            } else {
+                failedAttempts++;
+                Toast.makeText(this, "密码不正确", Toast.LENGTH_SHORT).show();
+                if (failedAttempts >= 3) {
+                    masterCard.setVisibility(View.GONE);
+                }
+            }
+        }
+    }
+
+    private void unlockApp(String password) {
+        masterPassword = password;
+        fingerprint = LegacyPasswordAlgorithm.fingerprint(password);
+        masterCard.setVisibility(View.GONE);
+        generatorCard.setVisibility(View.VISIBLE);
+        menuButton.setVisibility(View.VISIBLE);
+        loadedSecondInput = null;
+        loadSavedFields(secondInput.getText().toString());
     }
 
     private void buildGeneratorCard(LinearLayout page) {
         generatorCard = card();
         generatorCard.setVisibility(View.GONE);
         generatorCard.addView(sectionTitle("生成密码"), matchWrap());
-        generatorCard.addView(sectionCaption("输入内容相同，可恢复之前保存的长度和备注。"),
+        generatorCard.addView(sectionCaption("输入内容相同，可载入之前保存的长度和备注。"),
                 withTopMargin(matchWrap(), 6));
 
         generatorCard.addView(fieldLabel("输入内容"), withTopMargin(matchWrap(), 19));
@@ -179,8 +257,22 @@ public class MainActivity extends Activity {
         styleInput(noteInput);
         generatorCard.addView(noteInput, withTopMargin(matchWrap(), 6));
 
+        LinearLayout buttonRow = new LinearLayout(this);
+        buttonRow.setOrientation(LinearLayout.HORIZONTAL);
+
         generateButton = primaryButton("生成密码");
-        generatorCard.addView(generateButton, withTopMargin(matchWrap(), 20));
+        saveButton = secondaryButton("保存记录");
+
+        LinearLayout.LayoutParams btnParams1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        btnParams1.rightMargin = dp(6);
+
+        LinearLayout.LayoutParams btnParams2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        btnParams2.leftMargin = dp(6);
+
+        buttonRow.addView(generateButton, btnParams1);
+        buttonRow.addView(saveButton, btnParams2);
+
+        generatorCard.addView(buttonRow, withTopMargin(matchWrap(), 20));
 
         page.addView(generatorCard, bottomMargin(matchWrap(), 16));
 
@@ -233,54 +325,25 @@ public class MainActivity extends Activity {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 int selectedLength = (Integer) parent.getItemAtPosition(position);
-                if (selectedLength != lastSpinnerLength) {
-                    lastSpinnerLength = selectedLength;
-                    saveCurrentEntry();
-                }
+                lastSpinnerLength = selectedLength;
             }
 
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
 
-        noteInput.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                saveCurrentEntry();
-            }
-
-            @Override public void afterTextChanged(Editable s) {}
-        });
-
         generateButton.setOnClickListener(v -> {
-            saveCurrentEntry();
+            String secondValue = secondInput.getText().toString();
+            if (secondValue.isEmpty()) {
+                Toast.makeText(this, "请输入内容", Toast.LENGTH_SHORT).show();
+                return;
+            }
             int length = (Integer) lengthSpinner.getSelectedItem();
             result.setText(LegacyPasswordAlgorithm.generate(
-                    secondInput.getText().toString(), fingerprint, length));
+                    secondValue, fingerprint, length));
             resultCard.setVisibility(View.VISIBLE);
         });
 
-    }
-
-    private void verifyMaster() {
-        String password = masterInput.getText().toString();
-        String timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                .format(new java.util.Date());
-        if (LegacyPasswordAlgorithm.isMasterPasswordValid(password, timestamp)) {
-            masterPassword = password;
-            fingerprint = LegacyPasswordAlgorithm.fingerprint(password);
-            failedAttempts = 0;
-            masterCard.setVisibility(View.GONE);
-            generatorCard.setVisibility(View.VISIBLE);
-            menuButton.setVisibility(View.VISIBLE);
-            loadedSecondInput = null;
-            loadSavedFields(secondInput.getText().toString());
-        } else {
-            failedAttempts++;
-            Toast.makeText(this, "密码不正确", Toast.LENGTH_SHORT).show();
-            if (failedAttempts >= 3) masterCard.setVisibility(View.GONE);
-        }
+        saveButton.setOnClickListener(v -> performSaveEntry());
     }
 
     private void loadSavedFields(String secondValue) {
@@ -305,14 +368,18 @@ public class MainActivity extends Activity {
         lastSpinnerLength = position + 8;
     }
 
-    private void saveCurrentEntry() {
+    private void performSaveEntry() {
         if (loadingSavedEntry || fingerprint == null) return;
         String secondValue = secondInput.getText().toString();
-        if (secondValue.isEmpty()) return;
+        if (secondValue.isEmpty()) {
+            Toast.makeText(this, "请输入需要保存的内容", Toast.LENGTH_SHORT).show();
+            return;
+        }
         int length = (Integer) lengthSpinner.getSelectedItem();
         try {
             savedEntryStore.save(fingerprint, secondValue, length, noteInput.getText().toString());
             storageErrorShown = false;
+            Toast.makeText(this, "记录已保存", Toast.LENGTH_SHORT).show();
         } catch (GeneralSecurityException | IOException | JSONException e) {
             showStorageError();
         }
@@ -330,16 +397,129 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "没有找到匹配的备注", Toast.LENGTH_SHORT).show();
                 return;
             }
-            SavedEntryStore.NoteMatch match = matches.get(0);
-            secondInput.setText(match.secondInput);
-            loadedSecondInput = match.secondInput;
-            loadSavedFields(match.secondInput);
-            String message = matches.size() == 1
-                    ? "已载入匹配记录"
-                    : "找到 " + matches.size() + " 条，已载入第一条；可缩小关键词继续搜索";
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            showSearchResultsDialog(query, matches);
         } catch (GeneralSecurityException | IOException | JSONException | IllegalArgumentException e) {
             Toast.makeText(this, "备注检索失败，保存数据暂时无法读取", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showSearchResultsDialog(String query, List<SavedEntryStore.NoteMatch> matches) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("检索结果 (“" + query + "”，共 " + matches.size() + " 条)");
+
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setPadding(dp(16), dp(8), dp(16), dp(8));
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+
+        AlertDialog dialog = builder.setView(scrollView)
+                .setNegativeButton("关闭", null)
+                .create();
+
+        renderSearchResultsList(dialog, container, matches);
+        scrollView.addView(container);
+        dialog.show();
+    }
+
+    private void renderSearchResultsList(AlertDialog dialog, LinearLayout container, List<SavedEntryStore.NoteMatch> matches) {
+        container.removeAllViews();
+        if (matches.isEmpty()) {
+            TextView emptyView = new TextView(this);
+            emptyView.setText("暂无匹配记录");
+            emptyView.setTextColor(MUTED);
+            emptyView.setTextSize(14);
+            emptyView.setGravity(Gravity.CENTER);
+            emptyView.setPadding(0, dp(20), 0, dp(20));
+            container.addView(emptyView, matchWrap());
+            return;
+        }
+
+        for (SavedEntryStore.NoteMatch match : matches) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(14), dp(12), dp(14), dp(12));
+            card.setBackground(rounded(CARD, BORDER, 12));
+
+            LinearLayout headerRow = new LinearLayout(this);
+            headerRow.setOrientation(LinearLayout.HORIZONTAL);
+            headerRow.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView inputTitle = new TextView(this);
+            inputTitle.setText(match.secondInput);
+            inputTitle.setTextColor(INK);
+            inputTitle.setTextSize(16);
+            inputTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            headerRow.addView(inputTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView useBtn = new TextView(this);
+            useBtn.setText("使用");
+            useBtn.setTextColor(ACCENT);
+            useBtn.setTextSize(14);
+            useBtn.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            useBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+            useBtn.setOnClickListener(v -> {
+                secondInput.setText(match.secondInput);
+                loadedSecondInput = match.secondInput;
+                setSpinnerLength(match.length);
+                noteInput.setText(match.note);
+                resultCard.setVisibility(View.GONE);
+                dialog.dismiss();
+                Toast.makeText(this, "已载入记录: " + match.secondInput, Toast.LENGTH_SHORT).show();
+            });
+            headerRow.addView(useBtn);
+
+            TextView deleteBtn = new TextView(this);
+            deleteBtn.setText("删除");
+            deleteBtn.setTextColor(Color.rgb(230, 80, 80));
+            deleteBtn.setTextSize(14);
+            deleteBtn.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            deleteBtn.setPadding(dp(10), dp(4), dp(4), dp(4));
+            deleteBtn.setOnClickListener(v -> {
+                new AlertDialog.Builder(this)
+                        .setTitle("确认删除")
+                        .setMessage("确定要删除记录 “" + match.secondInput + "” 吗？")
+                        .setPositiveButton("删除", (d, w) -> {
+                            savedEntryStore.delete(fingerprint, match.secondInput);
+                            matches.remove(match);
+                            if (secondInput.getText().toString().equals(match.secondInput)) {
+                                loadSavedFields(match.secondInput);
+                            }
+                            Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
+                            if (matches.isEmpty()) {
+                                dialog.dismiss();
+                                Toast.makeText(this, "匹配记录已全部删除", Toast.LENGTH_SHORT).show();
+                            } else {
+                                dialog.setTitle("检索结果 (共 " + matches.size() + " 条)");
+                                renderSearchResultsList(dialog, container, matches);
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+            headerRow.addView(deleteBtn);
+
+            card.addView(headerRow, matchWrap());
+
+            TextView noteView = new TextView(this);
+            noteView.setText("备注: " + (match.note.isEmpty() ? "无" : match.note));
+            noteView.setTextColor(MUTED);
+            noteView.setTextSize(13);
+            LinearLayout.LayoutParams noteParams = matchWrap();
+            noteParams.topMargin = dp(4);
+            card.addView(noteView, noteParams);
+
+            TextView lenView = new TextView(this);
+            lenView.setText("密码长度: " + match.length + " 位");
+            lenView.setTextColor(MUTED);
+            lenView.setTextSize(12);
+            LinearLayout.LayoutParams lenParams = matchWrap();
+            lenParams.topMargin = dp(2);
+            card.addView(lenView, lenParams);
+
+            LinearLayout.LayoutParams cardParams = matchWrap();
+            cardParams.bottomMargin = dp(10);
+            container.addView(card, cardParams);
         }
     }
 
@@ -383,7 +563,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        saveCurrentEntry();
         super.onPause();
     }
 
@@ -508,6 +687,20 @@ public class MainActivity extends Activity {
         button.setMinHeight(dp(52));
         button.setPadding(dp(16), 0, dp(16), 0);
         button.setBackground(rounded(ACCENT, ACCENT, 13));
+        button.setElevation(dp(2));
+        return button;
+    }
+
+    private Button secondaryButton(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextColor(ACCENT);
+        button.setTextSize(15);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setAllCaps(false);
+        button.setMinHeight(dp(52));
+        button.setPadding(dp(12), 0, dp(12), 0);
+        button.setBackground(rounded(FIELD, ACCENT, 13));
         button.setElevation(dp(2));
         return button;
     }

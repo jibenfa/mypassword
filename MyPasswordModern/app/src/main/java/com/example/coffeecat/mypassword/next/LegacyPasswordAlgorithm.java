@@ -4,18 +4,14 @@ import java.nio.charset.Charset;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-/** Compatibility implementation of the original app's SHA-256 based rules. */
+/** Compatibility implementation of SHA-256 based password algorithms. */
 final class LegacyPasswordAlgorithm {
-    //保护密码的sha256第19个hex字符至60个hex字符
-    private static final String LEGACY_CHECK_FRAGMENT =
-            "保护密码的sha256第19个hex字符至60个hex字符";
     private static final String SYMBOLS = "~!@#$%^&*()_+-=";
 
     private LegacyPasswordAlgorithm() {}
 
     static String sha256(String value) {
         try {
-            // The old implementation used String.getBytes() with the platform default charset.
             byte[] bytes = MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(Charset.defaultCharset()));
             StringBuilder hex = new StringBuilder(bytes.length * 2);
@@ -34,11 +30,13 @@ final class LegacyPasswordAlgorithm {
         return sha256(masterPassword).substring(0, 18);
     }
 
-    static boolean isMasterPasswordValid(String masterPassword, String legacyTimestamp) {
-        String hash = sha256(masterPassword);
-        String actual = sha256(hash.substring(18, 60) + legacyTimestamp);
-        String expected = sha256(LEGACY_CHECK_FRAGMENT + legacyTimestamp);
-        return actual.equals(expected);
+    static String getCheckFragment(String masterPassword) {
+        return sha256(masterPassword).substring(18, 60);
+    }
+
+    static boolean isMasterPasswordValid(String masterPassword, String storedCheckFragment) {
+        if (storedCheckFragment == null || masterPassword == null) return false;
+        return getCheckFragment(masterPassword).equals(storedCheckFragment);
     }
 
     static String generate(String secondInput, String fingerprint) {

@@ -33,6 +33,7 @@ import javax.crypto.spec.SecretKeySpec;
 final class SavedEntryStore {
     private static final String PREFERENCES = "saved_entries";
     private static final String KEY_ALIAS = "mypassword_saved_entries_key";
+    private static final String KEY_MASTER_CHECK = "__master_check_fragment__";
     private static final int IV_LENGTH = 12;
     private static final int BACKUP_ITERATIONS = 200_000;
     private static final int BACKUP_SALT_LENGTH = 16;
@@ -41,6 +42,20 @@ final class SavedEntryStore {
 
     SavedEntryStore(Context context) {
         preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
+    }
+
+    boolean hasMasterPassword() {
+        return preferences.contains(KEY_MASTER_CHECK);
+    }
+
+    void setMasterPassword(String masterPassword) {
+        String checkFragment = LegacyPasswordAlgorithm.getCheckFragment(masterPassword);
+        preferences.edit().putString(KEY_MASTER_CHECK, checkFragment).apply();
+    }
+
+    boolean verifyMasterPassword(String masterPassword) {
+        String storedCheck = preferences.getString(KEY_MASTER_CHECK, null);
+        return LegacyPasswordAlgorithm.isMasterPasswordValid(masterPassword, storedCheck);
     }
 
     Entry load(String fingerprint, String secondInput) throws GeneralSecurityException, IOException {
@@ -87,6 +102,13 @@ final class SavedEntryStore {
         preferences.edit().putString(id, Base64.encodeToString(packed, Base64.NO_WRAP)).apply();
     }
 
+    boolean delete(String fingerprint, String secondInput) {
+        String id = entryId(fingerprint, secondInput);
+        if (!preferences.contains(id)) return false;
+        preferences.edit().remove(id).apply();
+        return true;
+    }
+
     List<NoteMatch> searchByNote(String fingerprint, String query)
             throws GeneralSecurityException, IOException, JSONException {
         String needle = query.trim().toLowerCase(Locale.ROOT);
@@ -96,12 +118,17 @@ final class SavedEntryStore {
         for (Map.Entry<String, ?> stored : preferences.getAll().entrySet()) {
             if (!(stored.getValue() instanceof String)) continue;
             String id = stored.getKey();
-            JSONObject entry = decryptStoredValue(id, (String) stored.getValue());
-            String secondInput = entry.optString("secondInput", null);
-            if (secondInput == null || !entryId(fingerprint, secondInput).equals(id)) continue;
-            String note = entry.optString("note", "");
-            if (note.toLowerCase(Locale.ROOT).contains(needle)) {
-                matches.add(new NoteMatch(secondInput, note, entry.optInt("length", 8)));
+            if (KEY_MASTER_CHECK.equals(id)) continue;
+            try {
+                JSONObject entry = decryptStoredValue(id, (String) stored.getValue());
+                String secondInput = entry.optString("secondInput", null);
+                if (secondInput == null || !entryId(fingerprint, secondInput).equals(id)) continue;
+                String note = entry.optString("note", "");
+                if (note.toLowerCase(Locale.ROOT).contains(needle)) {
+                    matches.add(new NoteMatch(secondInput, note, entry.optInt("length", 8)));
+                }
+            } catch (GeneralSecurityException | IOException | JSONException ignored) {
+                // Ignore entries that cannot be decrypted with current key/fingerprint
             }
         }
         return matches;
@@ -114,8 +141,13 @@ final class SavedEntryStore {
         for (Map.Entry<String, ?> stored : preferences.getAll().entrySet()) {
             if (!(stored.getValue() instanceof String)) continue;
             String id = stored.getKey();
-            JSONObject entry = decryptStoredValue(id, (String) stored.getValue());
-            entries.put(entry);
+            if (KEY_MASTER_CHECK.equals(id)) continue;
+            try {
+                JSONObject entry = decryptStoredValue(id, (String) stored.getValue());
+                entries.put(entry);
+            } catch (GeneralSecurityException | IOException | JSONException ignored) {
+                // Ignore entries that cannot be decrypted
+            }
         }
         payload.put("entries", entries);
 
