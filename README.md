@@ -1,5 +1,11 @@
 # MyPassword (单机离线密码管理器)
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Android%206.0%2B%20(API%2023%2B)-brightgreen.svg" alt="Android Version" />
+  <img src="https://img.shields.io/badge/Target%20SDK-36-blue.svg" alt="Target SDK" />
+  <img src="https://img.shields.io/badge/License-MIT-orange.svg" alt="License" />
+</p>
+
 一款安全、离线的 Android 密码管理与一站一密生成工具。
 
 ## 核心特性
@@ -29,3 +35,7 @@
 
 - 打开方式：启动 Android Studio，选择 **Open**，定位并打开项目子目录 `MyPasswordModern`。
 - 构建环境：JDK 17+，Android SDK 36。
+
+## 开源协议
+
+本项目基于 [MIT License](LICENSE) 协议开源。
